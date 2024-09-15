@@ -2,7 +2,8 @@
 
 (library (ray)  
   (export
-   Vector2 Vector3 Vector4 Quaternion Matrix Color color Rectangle Image
+   Vector2 Vector3 Vector4 Quaternion Matrix Color make-rectangle make-color make-pod-vec 
+   make-vector2 make-camera2d frand-between rand-between Rectangle Image
    Texture Texture2D TextureCubemap RenderTexture RenderTexture2D NPatchInfo GlyphInfo
    Font Camera3D Camera Camera2D Mesh Shader MaterialMap Material Transform BoneInfo
    Model ModelAnimation Ray rAudioBuffer rAudioProcessor RayCollision BoundingBox Wave
@@ -212,7 +213,34 @@
       ((i3nt  ti3nt  a6nt  ta6nt)  (load-shared-object "raylib.dll"))
       ((i3le  ti3le  a6le  ta6le)  (load-shared-object "libraylib.so"))
       ((i3osx ti3osx a6osx ta6osx) (load-shared-object "libraylib.dylib"))))
-  
+
+
+
+  ;; GC related routines
+  (define *guardian* (make-guardian))
+
+  ;; Register object with guardian
+  ;; params: 
+  ;;     obj  - object being guarded
+  ;;     proc - func that will be invoked by gc to free object
+  (define (register-object obj proc)
+    (let [(x (cons obj proc))]
+      (*guardian* x)
+      x))
+
+  ;; Simple finalizer which invokes foreign-free on the object
+  ;; Assumes obj was allocated using foreign-free and was not previously freed. 
+  (define (finalizer x)
+    (foreign-free x))
+
+  (define run-finalizers
+    (lambda ()
+      (let run ()
+        (let ([x (*guardian*)])
+          (when x
+            (((cdr x) (car x)) 'erased)
+            (run))))))
+
   (define-ftype Vector2
     (struct
       [x float]
@@ -246,14 +274,6 @@
       [g unsigned-8]
       [b unsigned-8]
       [a unsigned-8]))
-
-  (define (color r g b a)
-    (let ((c (make-ftype-pointer Color (foreign-alloc (ftype-sizeof Color)))))
-      (ftype-set! Color (r) c r)
-      (ftype-set! Color (g) c g)
-      (ftype-set! Color (b) c b)
-      (ftype-set! Color (a) c a)
-      c))
 
   (define-ftype Rectangle
     (struct
@@ -505,6 +525,412 @@
       [count unsigned-int]
       [events (* AutomationEvent)]))
 
+
+  ;; Constructors 
+  ;; Vector2 constructor
+  (define (make-vector2 x y)
+    (let ((v (make-ftype-pointer Vector2 (foreign-alloc (ftype-sizeof Vector2)))))
+      (ftype-set! Vector2 (x) v (inexact x))
+      (ftype-set! Vector2 (y) v (inexact y))
+      (register-object v finalizer)
+      v))
+
+  ;; Vector3 constructor
+  (define (make-vector3 x y z)
+    (let ((v (make-ftype-pointer Vector3 (foreign-alloc (ftype-sizeof Vector3)))))
+      (ftype-set! Vector3 (x) v x)
+      (ftype-set! Vector3 (y) v y)
+      (ftype-set! Vector3 (z) v z)
+      (register-object v finalizer)
+      v))
+
+  ;; Vector4 constructor
+  (define (make-vector4 x y z w)
+    (let ((v (make-ftype-pointer Vector4 (foreign-alloc (ftype-sizeof Vector4)))))
+      (ftype-set! Vector4 (x) v x)
+      (ftype-set! Vector4 (y) v y)
+      (ftype-set! Vector4 (z) v z)
+      (ftype-set! Vector4 (w) v w)
+      (register-object v finalizer)
+      v))
+
+  ;; Quaternion constructor (same as Vector4)
+  (define make-quaternion make-vector4)
+
+  ;; Matrix constructor
+  (define (make-matrix m0 m4 m8 m12 m1 m5 m9 m13 m2 m6 m10 m14 m3 m7 m11 m15)
+    (let ((m (make-ftype-pointer Matrix (foreign-alloc (ftype-sizeof Matrix)))))
+      (ftype-set! Matrix (m0) m m0)
+      (ftype-set! Matrix (m4) m m4)
+      (ftype-set! Matrix (m8) m m8)
+      (ftype-set! Matrix (m12) m m12)
+      (ftype-set! Matrix (m1) m m1)
+      (ftype-set! Matrix (m5) m m5)
+      (ftype-set! Matrix (m9) m m9)
+      (ftype-set! Matrix (m13) m m13)
+      (ftype-set! Matrix (m2) m m2)
+      (ftype-set! Matrix (m6) m m6)
+      (ftype-set! Matrix (m10) m m10)
+      (ftype-set! Matrix (m14) m m14)
+      (ftype-set! Matrix (m3) m m3)
+      (ftype-set! Matrix (m7) m m7)
+      (ftype-set! Matrix (m11) m m11)
+      (ftype-set! Matrix (m15) m m15)
+      (register-object m finalizer)
+      m))
+
+  ;; Rectangle constructor
+  (define (make-rectangle x y width height)
+    (let ((r (make-ftype-pointer Rectangle (foreign-alloc (ftype-sizeof Rectangle)))))
+      (ftype-set! Rectangle (x) r x)
+      (ftype-set! Rectangle (y) r y)
+      (ftype-set! Rectangle (width) r width)
+      (ftype-set! Rectangle (height) r height)
+      (register-object r finalizer)
+      r))
+
+  ;; Image constructor
+  (define (make-image data width height mipmaps format)
+    (let ((i (make-ftype-pointer Image (foreign-alloc (ftype-sizeof Image)))))
+      (ftype-set! Image (data) i data)
+      (ftype-set! Image (width) i width)
+      (ftype-set! Image (height) i height)
+      (ftype-set! Image (mipmaps) i mipmaps)
+      (ftype-set! Image (format) i format)
+      (register-object i finalizer)
+      i))
+
+  ;; Texture constructor
+  (define (make-texture id width height mipmaps format)
+    (let ((t (make-ftype-pointer Texture (foreign-alloc (ftype-sizeof Texture)))))
+      (ftype-set! Texture (id) t id)
+      (ftype-set! Texture (width) t width)
+      (ftype-set! Texture (height) t height)
+      (ftype-set! Texture (mipmaps) t mipmaps)
+      (ftype-set! Texture (format) t format)
+      (register-object t finalizer)
+      t))
+
+  ;; Texture2D constructor (same as Texture)
+  (define make-texture2d make-texture)
+
+  ;; TextureCubemap constructor (same as Texture)
+  (define make-texture-cubemap make-texture)
+
+  ;; RenderTexture constructor
+  ;; (define (make-render-texture id texture depth)
+  ;;   (let ((rt (make-ftype-pointer RenderTexture (foreign-alloc (ftype-sizeof RenderTexture)))))
+  ;;     (ftype-set! RenderTexture (id) rt id)
+  ;;     (ftype-set! RenderTexture (texture) rt texture)
+  ;;     (ftype-set! RenderTexture (depth) rt depth)
+  ;;     (register-object rt finalizer)
+  ;;     rt))
+
+  ;; RenderTexture2D constructor (same as RenderTexture)
+  ;;(define make-render-texture2d make-render-texture)
+
+  ;; NPatchInfo constructor
+  ;; (define (make-npatch-info source left top right bottom layout)
+  ;;   (let ((np (make-ftype-pointer NPatchInfo (foreign-alloc (ftype-sizeof NPatchInfo)))))
+  ;;     (ftype-set! NPatchInfo (source) np source)
+  ;;     (ftype-set! NPatchInfo (left) np left)
+  ;;     (ftype-set! NPatchInfo (top) np top)
+  ;;     (ftype-set! NPatchInfo (right) np right)
+  ;;     (ftype-set! NPatchInfo (bottom) np bottom)
+  ;;     (ftype-set! NPatchInfo (layout) np layout)
+  ;;     (register-object np finalizer)
+  ;;     np))
+
+  ;; ;; GlyphInfo constructor
+  ;; (define (make-glyph-info value offsetX offsetY advanceX image)
+  ;;   (let ((gi (make-ftype-pointer GlyphInfo (foreign-alloc (ftype-sizeof GlyphInfo)))))
+  ;;     (ftype-set! GlyphInfo (value) gi value)
+  ;;     (ftype-set! GlyphInfo (offsetX) gi offsetX)
+  ;;     (ftype-set! GlyphInfo (offsetY) gi offsetY)
+  ;;     (ftype-set! GlyphInfo (advanceX) gi advanceX)
+  ;;     (ftype-set! GlyphInfo (image) gi image)
+  ;;     (register-object gi finalizer)
+  ;;     gi))
+
+  ;; ;; Font constructor
+  ;; (define (make-font baseSize glyphCount glyphPadding texture recs glyphs)
+  ;;   (let ((f (make-ftype-pointer Font (foreign-alloc (ftype-sizeof Font)))))
+  ;;     (ftype-set! Font (baseSize) f baseSize)
+  ;;     (ftype-set! Font (glyphCount) f glyphCount)
+  ;;     (ftype-set! Font (glyphPadding) f glyphPadding)
+  ;;     (ftype-set! Font (texture) f texture)
+  ;;     (ftype-set! Font (recs) f recs)
+  ;;     (ftype-set! Font (glyphs) f glyphs)
+  ;;     (register-object f finalizer)
+  ;;     f))
+
+  ;; ;; Camera3D constructor
+  ;; (define (make-camera3d position target up fovy projection)
+  ;;   (let ((c (make-ftype-pointer Camera3D (foreign-alloc (ftype-sizeof Camera3D)))))
+  ;;     (ftype-set! Camera3D (position) c position)
+  ;;     (ftype-set! Camera3D (target) c target)
+  ;;     (ftype-set! Camera3D (up) c up)
+  ;;     (ftype-set! Camera3D (fovy) c fovy)
+  ;;     (ftype-set! Camera3D (projection) c projection)
+  ;;     (register-object c finalizer)
+  ;;     c))
+
+  ;; ;; Camera constructor (same as Camera3D)
+  ;; (define make-camera make-camera3d)
+
+  ;; ;; Camera2D constructor
+  (define (make-camera2d offset target rotation zoom)
+    (let* ((c (make-ftype-pointer Camera2D (foreign-alloc (ftype-sizeof Camera2D))))
+           (offset-x (ftype-&ref Camera2D (offset x) c))
+           (offset-y (ftype-&ref Camera2D (offset y) c))
+           (target-x (ftype-&ref Camera2D (target x) c))
+           (target-y (ftype-&ref Camera2D (target y) c)))
+
+      (ftype-set! float () offset-x (ftype-ref Vector2 (x) offset))
+      (ftype-set! float () offset-y (ftype-ref Vector2 (y) target))
+
+      (ftype-set! float () target-x (ftype-ref Vector2 (x) offset))
+      (ftype-set! float () target-y (ftype-ref Vector2 (y) offset))
+
+      (ftype-set! Camera2D (rotation) c (inexact rotation))
+      (ftype-set! Camera2D (zoom) c (inexact zoom))
+      (register-object c finalizer)
+      c))
+
+  ;; ;; Color constructor
+  (define (make-color r g b a)
+    (let ((c (make-ftype-pointer Color (foreign-alloc (ftype-sizeof Color)))))
+      (ftype-set! Color (r) c r)
+      (ftype-set! Color (g) c g)
+      (ftype-set! Color (b) c b)
+      (ftype-set! Color (a) c a)
+      (register-object c finalizer)
+      c))
+
+  ;; ;; Mesh constructor
+  ;; (define (make-mesh vertexCount triangleCount vertices texcoords texcoords2 normals tangents colors indices animVertices animNormals boneIds boneWeights vaoId vboId)
+  ;;   (let ((m (make-ftype-pointer Mesh (foreign-alloc (ftype-sizeof Mesh)))))
+  ;;     (ftype-set! Mesh (vertexCount) m vertexCount)
+  ;;     (ftype-set! Mesh (triangleCount) m triangleCount)
+  ;;     (ftype-set! Mesh (vertices) m vertices)
+  ;;     (ftype-set! Mesh (texcoords) m texcoords)
+  ;;     (ftype-set! Mesh (texcoords2) m texcoords2)
+  ;;     (ftype-set! Mesh (normals) m normals)
+  ;;     (ftype-set! Mesh (tangents) m tangents)
+  ;;     (ftype-set! Mesh (colors) m colors)
+  ;;     (ftype-set! Mesh (indices) m indices)
+  ;;     (ftype-set! Mesh (animVertices) m animVertices)
+  ;;     (ftype-set! Mesh (animNormals) m animNormals)
+  ;;     (ftype-set! Mesh (boneIds) m boneIds)
+  ;;     (ftype-set! Mesh (boneWeights) m boneWeights)
+  ;;     (ftype-set! Mesh (vaoId) m vaoId)
+  ;;     (ftype-set! Mesh (vboId) m vboId)
+  ;;     (register-object m finalizer)
+  ;;     m))
+
+  ;; ;; Shader constructor
+  ;; (define (make-shader id locs)
+  ;;   (let ((s (make-ftype-pointer Shader (foreign-alloc (ftype-sizeof Shader)))))
+  ;;     (ftype-set! Shader (id) s id)
+  ;;     (ftype-set! Shader (locs) s locs)
+  ;;     (register-object s finalizer)
+  ;;     s))
+
+  ;; ;; MaterialMap constructor
+  ;; (define (make-material-map texture color value)
+  ;;   (let ((mm (make-ftype-pointer MaterialMap (foreign-alloc (ftype-sizeof MaterialMap)))))
+  ;;     (ftype-set! MaterialMap (texture) mm texture)
+  ;;     (ftype-set! MaterialMap (color) mm color)
+  ;;     (ftype-set! MaterialMap (value) mm value)
+  ;;     (register-object mm finalizer)
+  ;;     mm))
+
+  ;; ;; Material constructor
+  ;; (define (make-material shader maps params)
+  ;;   (let ((m (make-ftype-pointer Material (foreign-alloc (ftype-sizeof Material)))))
+  ;;     (ftype-set! Material (shader) m shader)
+  ;;     (ftype-set! Material (maps) m maps)
+  ;;     (ftype-set! Material (params) m params)
+  ;;     (register-object m finalizer)
+  ;;     m))
+
+  ;; ;; Transform constructor
+  ;; (define (make-transform translation rotation scale)
+  ;;   (let ((t (make-ftype-pointer Transform (foreign-alloc (ftype-sizeof Transform)))))
+  ;;     (ftype-set! Transform (translation) t translation)
+  ;;     (ftype-set! Transform (rotation) t rotation)
+  ;;     (ftype-set! Transform (scale) t scale)
+  ;;     (register-object t finalizer)
+  ;;     t))
+
+  ;; ;; BoneInfo constructor
+  ;; (define (make-bone-info name parent)
+  ;;   (let ((bi (make-ftype-pointer BoneInfo (foreign-alloc (ftype-sizeof BoneInfo)))))
+  ;;     (ftype-set! BoneInfo (name) bi name)
+  ;;     (ftype-set! BoneInfo (parent) bi parent)
+  ;;     (register-object bi finalizer)
+  ;;     bi))
+
+  ;; ;; Model constructor
+  ;; (define (make-model transform meshCount materialCount meshes materials meshMaterial boneCount bones bindPose)
+  ;;   (let ((m (make-ftype-pointer Model (foreign-alloc (ftype-sizeof Model)))))
+  ;;     (ftype-set! Model (transform) m transform)
+  ;;     (ftype-set! Model (meshCount) m meshCount)
+  ;;     (ftype-set! Model (materialCount) m materialCount)
+  ;;     (ftype-set! Model (meshes) m meshes)
+  ;;     (ftype-set! Model (materials) m materials)
+  ;;     (ftype-set! Model (meshMaterial) m meshMaterial)
+  ;;     (ftype-set! Model (boneCount) m boneCount)
+  ;;     (ftype-set! Model (bones) m bones)
+  ;;     (ftype-set! Model (bindPose) m bindPose)
+  ;;     (register-object m finalizer)
+  ;;     m))
+
+  ;; ;; ModelAnimation constructor
+  ;; (define (make-model-animation boneCount frameCount bones framePoses name)
+  ;;   (let ((ma (make-ftype-pointer ModelAnimation (foreign-alloc (ftype-sizeof ModelAnimation)))))
+  ;;     (ftype-set! ModelAnimation (boneCount) ma boneCount)
+  ;;     (ftype-set! ModelAnimation (frameCount) ma frameCount)
+  ;;     (ftype-set! ModelAnimation (bones) ma bones)
+  ;;     (ftype-set! ModelAnimation (framePoses) ma framePoses)
+  ;;     (ftype-set! ModelAnimation (name) ma name)
+  ;;     (register-object ma finalizer)
+  ;;     ma))
+
+  ;; ;; Ray constructor
+  ;; (define (make-ray position direction)
+  ;;   (let ((r (make-ftype-pointer Ray (foreign-alloc (ftype-sizeof Ray)))))
+  ;;     (ftype-set! Ray (position) r position)
+  ;;     (ftype-set! Ray (direction) r direction)
+  ;;     (register-object r finalizer)
+  ;;     r))
+
+  ;; ;; RayCollision constructor
+  ;; (define (make-ray-collision hit distance point normal)
+  ;;   (let ((rc (make-ftype-pointer RayCollision (foreign-alloc (ftype-sizeof RayCollision)))))
+  ;;     (ftype-set! RayCollision (hit) rc hit)
+  ;;     (ftype-set! RayCollision (distance) rc distance)
+  ;;     (ftype-set! RayCollision (point) rc point)
+  ;;     (ftype-set! RayCollision (normal) rc normal)
+  ;;     (register-object rc finalizer)
+  ;;     rc))
+
+  ;; ;; BoundingBox constructor
+  ;; (define (make-bounding-box min max)
+  ;;   (let ((bb (make-ftype-pointer BoundingBox (foreign-alloc (ftype-sizeof BoundingBox)))))
+  ;;     (ftype-set! BoundingBox (min) bb min)
+  ;;     (ftype-set! BoundingBox (max) bb max)
+  ;;     (register-object bb finalizer)
+  ;;     bb))
+
+  ;; ;; Wave constructor
+  ;; (define (make-wave frameCount sampleRate sampleSize channels data)
+  ;;   (let ((w (make-ftype-pointer Wave (foreign-alloc (ftype-sizeof Wave)))))
+  ;;     (ftype-set! Wave (frameCount) w frameCount)
+  ;;     (ftype-set! Wave (sampleRate) w sampleRate)
+  ;;     (ftype-set! Wave (sampleSize) w sampleSize)
+  ;;     (ftype-set! Wave (channels) w channels)
+  ;;     (ftype-set! Wave (data) w data)
+  ;;     (register-object w finalizer)
+  ;;     w))
+
+  ;; ;; AudioStream constructor
+  ;; (define (make-audio-stream buffer processor sampleRate sampleSize channels)
+  ;;   (let ((as (make-ftype-pointer AudioStream (foreign-alloc (ftype-sizeof AudioStream)))))
+  ;;     (ftype-set! AudioStream (buffer) as buffer)
+  ;;     (ftype-set! AudioStream (processor) as processor)
+  ;;     (ftype-set! AudioStream (sampleRate) as sampleRate)
+  ;;     (ftype-set! AudioStream (sampleSize) as sampleSize)
+  ;;     (ftype-set! AudioStream (channels) as channels)
+  ;;     (register-object as finalizer)
+  ;;     as))
+
+  ;; ;; Sound constructor
+  ;; (define (make-sound stream frameCount)
+  ;;   (let ((s (make-ftype-pointer Sound (foreign-alloc (ftype-sizeof Sound)))))
+  ;;     (ftype-set! Sound (stream) s stream)
+  ;;     (ftype-set! Sound (frameCount) s frameCount)
+  ;;     (register-object s finalizer)
+  ;;     s))
+
+  ;; ;; Music constructor
+  ;; (define (make-music stream frameCount looping ctxType ctxData)
+  ;;   (let ((m (make-ftype-pointer Music (foreign-alloc (ftype-sizeof Music)))))
+  ;;     (ftype-set! Music (stream) m stream)
+  ;;     (ftype-set! Music (frameCount) m frameCount)
+  ;;     (ftype-set! Music (looping) m looping)
+  ;;     (ftype-set! Music (ctxType) m ctxType)
+  ;;     (ftype-set! Music (ctxData) m ctxData)
+  ;;     (register-object m finalizer)
+  ;;     m))
+
+  ;; ;; VrDeviceInfo constructor
+  ;; (define (make-vr-device-info hResolution vResolution hScreenSize vScreenSize vScreenCenter eyeToScreenDistance lensSeparationDistance interpupillaryDistance lensDistortionValues chromaAbCorrection)
+  ;;   (let ((vdi (make-ftype-pointer VrDeviceInfo (foreign-alloc (ftype-sizeof VrDeviceInfo)))))
+  ;;     (ftype-set! VrDeviceInfo (hResolution) vdi hResolution)
+  ;;     (ftype-set! VrDeviceInfo (vResolution) vdi vResolution)
+  ;;     (ftype-set! VrDeviceInfo (hScreenSize) vdi hScreenSize)
+  ;;     (ftype-set! VrDeviceInfo (vScreenSize) vdi vScreenSize)
+  ;;     (ftype-set! VrDeviceInfo (vScreenCenter) vdi vScreenCenter)
+  ;;     (ftype-set! VrDeviceInfo (eyeToScreenDistance) vdi eyeToScreenDistance)
+  ;;     (ftype-set! VrDeviceInfo (lensSeparationDistance) vdi lensSeparationDistance)
+  ;;     (ftype-set! VrDeviceInfo (interpupillaryDistance) vdi interpupillaryDistance)
+  ;;     (ftype-set! VrDeviceInfo (lensDistortionValues) vdi lensDistortionValues)
+  ;;     (ftype-set! VrDeviceInfo (chromaAbCorrection) vdi chromaAbCorrection)
+  ;;     (register-object vdi finalizer)
+  ;;     vdi))
+
+  ;; ;; VrStereoConfig constructor
+  ;; (define (make-vr-stereo-config projection viewOffset leftLensCenter rightLensCenter leftScreenCenter rightScreenCenter scale scaleIn)
+  ;;   (let ((vsc (make-ftype-pointer VrStereoConfig (foreign-alloc (ftype-sizeof VrStereoConfig)))))
+  ;;     (ftype-set! VrStereoConfig (projection) vsc projection)
+  ;;     (ftype-set! VrStereoConfig (viewOffset) vsc viewOffset)
+  ;;     (ftype-set! VrStereoConfig (leftLensCenter) vsc leftLensCenter)
+  ;;     (ftype-set! VrStereoConfig (rightLensCenter) vsc rightLensCenter)
+  ;;     (ftype-set! VrStereoConfig (leftScreenCenter) vsc leftScreenCenter)
+  ;;     (ftype-set! VrStereoConfig (rightScreenCenter) vsc rightScreenCenter)
+  ;;     (ftype-set! VrStereoConfig (scale) vsc scale)
+  ;;     (ftype-set! VrStereoConfig (scaleIn) vsc scaleIn)
+  ;;     (register-object vsc finalizer)
+  ;;     vsc))
+
+  ;; ;; FilePathList constructor
+  ;; (define (make-file-path-list capacity count paths)
+  ;;   (let ((fpl (make-ftype-pointer FilePathList (foreign-alloc (ftype-sizeof FilePathList)))))
+  ;;     (ftype-set! FilePathList (capacity) fpl capacity)
+  ;;     (ftype-set! FilePathList (count) fpl count)
+  ;;     (ftype-set! FilePathList (paths) fpl paths)
+  ;;     (register-object fpl finalizer)
+  ;;     fpl))
+
+  ;; ;; AutomationEvent constructor
+  ;; (define (make-automation-event frame type params)
+  ;;   (let ((ae (make-ftype-pointer AutomationEvent (foreign-alloc (ftype-sizeof AutomationEvent)))))
+  ;;     (ftype-set! AutomationEvent (frame) ae frame)
+  ;;     (ftype-set! AutomationEvent (type) ae type)
+  ;;     (ftype-set! AutomationEvent (params) ae params)
+  ;;     (register-object ae finalizer)
+  ;;     ae))
+
+  ;; ;; AutomationEventList constructor
+  ;; (define (make-automation-event-list capacity count events)
+  ;;   (let ((ael (make-ftype-pointer AutomationEventList (foreign-alloc (ftype-sizeof AutomationEventList)))))
+  ;;     (ftype-set! AutomationEventList (capacity) ael capacity)
+  ;;     (ftype-set! AutomationEventList (count) ael count)
+  ;;     (ftype-set! AutomationEventList (events) ael events)
+  ;;     (register-object ael finalizer)
+  ;;     ael))
+
+
+  ;; Sequences
+  (define-syntax make-pod-vec
+    (lambda (stx)
+      (syntax-case stx ()
+        ((_ type num-elements)
+         #'(let ((fptr (make-ftype-pointer type (foreign-alloc (* num-elements (ftype-sizeof type))))))
+             (register-object fptr finalizer)
+             fptr)))))
+  
   (define init-window
     (foreign-procedure "InitWindow" (int int string) void))
 
@@ -2568,34 +2994,42 @@
 
 
   ;; Colors 
-  (define LIGHTGRAY  (color 200 200 200 255))   ; Light Gray
-  (define GRAY       (color 130 130 130 255))   ; Gray
-  (define DARKGRAY   (color 80 80 80 255))      ; Dark Gray
-  (define YELLOW     (color 253 249 0 255))     ; Yellow
-  (define GOLD       (color 255 203 0 255))     ; Gold
-  (define ORANGE     (color 255 161 0 255))     ; Orange
-  (define PINK       (color 255 109 194 255))   ; Pink
-  (define RED        (color 230 41 55 255))     ; Red
-  (define MAROON     (color 190 33 55 255))     ; Maroon
-  (define GREEN      (color 0 228 48 255))      ; Green
-  (define LIME       (color 0 158 47 255))      ; Lime
-  (define DARKGREEN  (color 0 117 44 255))      ; Dark Green
-  (define SKYBLUE    (color 102 191 255 255))   ; Sky Blue
-  (define BLUE       (color 0 121 241 255))     ; Blue
-  (define DARKBLUE   (color 0 82 172 255))      ; Dark Blue
-  (define PURPLE     (color 200 122 255 255))   ; Purple
-  (define VIOLET     (color 135 60 190 255))    ; Violet
-  (define DARKPURPLE (color 112 31 126 255))    ; Dark Purple
-  (define BEIGE      (color 211 176 131 255))   ; Beige
-  (define BROWN      (color 127 106 79 255))    ; Brown
-  (define DARKBROWN  (color 76 63 47 255))      ; Dark Brown
+  (define LIGHTGRAY  (make-color 200 200 200 255))   ; Light Gray
+  (define GRAY       (make-color 130 130 130 255))   ; Gray
+  (define DARKGRAY   (make-color 80 80 80 255))      ; Dark Gray
+  (define YELLOW     (make-color 253 249 0 255))     ; Yellow
+  (define GOLD       (make-color 255 203 0 255))     ; Gold
+  (define ORANGE     (make-color 255 161 0 255))     ; Orange
+  (define PINK       (make-color 255 109 194 255))   ; Pink
+  (define RED        (make-color 230 41 55 255))     ; Red
+  (define MAROON     (make-color 190 33 55 255))     ; Maroon
+  (define GREEN      (make-color 0 228 48 255))      ; Green
+  (define LIME       (make-color 0 158 47 255))      ; Lime
+  (define DARKGREEN  (make-color 0 117 44 255))      ; Dark Green
+  (define SKYBLUE    (make-color 102 191 255 255))   ; Sky Blue
+  (define BLUE       (make-color 0 121 241 255))     ; Blue
+  (define DARKBLUE   (make-color 0 82 172 255))      ; Dark Blue
+  (define PURPLE     (make-color 200 122 255 255))   ; Purple
+  (define VIOLET     (make-color 135 60 190 255))    ; Violet
+  (define DARKPURPLE (make-color 112 31 126 255))    ; Dark Purple
+  (define BEIGE      (make-color 211 176 131 255))   ; Beige
+  (define BROWN      (make-color 127 106 79 255))    ; Brown
+  (define DARKBROWN  (make-color 76 63 47 255))      ; Dark Brown
 
-  (define WHITE      (color 255 255 255 255))   ; White
-  (define BLACK      (color 0 0 0 255))         ; Black
-  (define BLANK      (color 0 0 0 0))           ; Blank (Transparent)
-  (define MAGENTA    (color 255 0 255 255))     ; Magenta
-  (define RAYWHITE   (color 245 245 245 255))   ; My own White (raylib logo)
+  (define WHITE      (make-color 255 255 255 255))   ; White
+  (define BLACK      (make-color 0 0 0 255))         ; Black
+  (define BLANK      (make-color 0 0 0 0))           ; Blank (Transparent)
+  (define MAGENTA    (make-color 255 0 255 255))     ; Magenta
+  (define RAYWHITE   (make-color 245 245 245 255))   ; My own White (raylib logo)
 
+  
+  (define (rand-between a b)
+    (if (> a b)
+        (rand-between b a)  ; Swap a and b if a > b
+        (+ a (random (+ 1 (- b a))))))
+
+  (define (frand-between a b)
+    (inexact (rand-between a b)))
 
   )
 
