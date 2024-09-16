@@ -32,7 +32,7 @@
        ;; Press enter to return to TITLE screen
        (when (or (is-key-pressed KEY_ENTER) (is-gesture-detected GESTURE_TAP))
          (set! current-screen 'TITLE)))
-      (else (printf "booo ~a ~a\n" current-screen LOGO)))
+      (else (printf "booo ~a ~a\n" current-screen 'LOGO)))
 
     ;; Draw
     (begin-drawing)

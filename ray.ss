@@ -2,8 +2,11 @@
 
 (library (ray)  
   (export
-   Vector2 Vector3 Vector4 Quaternion Matrix Color make-rectangle make-color make-pod-vec 
-   make-vector2 make-camera2d frand-between rand-between Rectangle Image
+   Vector2 Vector3 Vector4 Quaternion Matrix Color make-rectangle make-color make-fvec fvec-at
+   make-vector2 make-camera2d camera2d-target-set! camera2d-rotation-set! camera2d-zoom-set!
+   camera2d-rotation camera2d-zoom rect-x rect-y rect-width rect-height camera2d-target-x
+   camera2d-target-y camera2d-offet-x camera2d-offset-y
+   frand-between rand-between Rectangle Image
    Texture Texture2D TextureCubemap RenderTexture RenderTexture2D NPatchInfo GlyphInfo
    Font Camera3D Camera Camera2D Mesh Shader MaterialMap Material Transform BoneInfo
    Model ModelAnimation Ray rAudioBuffer rAudioProcessor RayCollision BoundingBox Wave
@@ -246,6 +249,13 @@
       [x float]
       [y float]))
 
+  (define (vector2-x v)
+    (ftype-ref Vector2 (x) v))
+
+  (define (vector2-y v)
+    (ftype-ref Vector2 (y) v))
+
+
   (define-ftype Vector3
     (struct
       [x float]
@@ -281,6 +291,18 @@
       [y float]
       [width float]
       [height float]))
+  
+  (define (rect-x r)
+    (ftype-ref Rectangle (x) r))
+  
+  (define (rect-y r)
+    (ftype-ref Rectangle (y) r))
+
+  (define (rect-width r)
+    (ftype-ref Rectangle (width) r))
+
+  (define (rect-height r)
+    (ftype-ref Rectangle (height) r))
 
   (define-ftype Image
     (struct
@@ -352,6 +374,52 @@
       [target Vector2]
       [rotation float]
       [zoom float]))
+  
+  (define (make-camera2d offset target rotation zoom)
+    (let* ((c (make-ftype-pointer Camera2D (foreign-alloc (ftype-sizeof Camera2D))))
+           (offset-x (ftype-&ref Camera2D (offset x) c))
+           (offset-y (ftype-&ref Camera2D (offset y) c))
+           (target-x (ftype-&ref Camera2D (target x) c))
+           (target-y (ftype-&ref Camera2D (target y) c)))
+
+      (ftype-set! float () offset-x (ftype-ref Vector2 (x) offset))
+      (ftype-set! float () offset-y (ftype-ref Vector2 (y) target))
+
+      (ftype-set! float () target-x (ftype-ref Vector2 (x) offset))
+      (ftype-set! float () target-y (ftype-ref Vector2 (y) offset))
+
+      (ftype-set! Camera2D (rotation) c (inexact rotation))
+      (ftype-set! Camera2D (zoom) c (inexact zoom))
+      (register-object c finalizer)
+      c))
+
+  (define (camera2d-target-set! c x y)
+    (ftype-set! Camera2D (target x) c (inexact x))
+    (ftype-set! Camera2D (target y) c (inexact y)))
+  
+  (define (camera2d-rotation-set! c r)
+    (ftype-set! Camera2D (rotation) c (inexact r)))
+
+  (define (camera2d-zoom-set! c z)
+    (ftype-set! Camera2D (zoom) c (inexact z)))
+
+  (define (camera2d-rotation c)
+    (ftype-ref Camera2D (rotation) c))
+
+  (define (camera2d-zoom c)
+    (ftype-ref Camera2D (zoom) c))
+  
+  (define (camera2d-target-x c)
+    (ftype-ref Camera2D (target x) c))
+  
+  (define (camera2d-target-y c)
+    (ftype-ref Camera2D (target y) c))
+
+  (define (camera2d-offet-x c)
+    (ftype-ref Camera2D (offset x) c))
+  
+  (define (camera2d-offset-y c)
+    (ftype-ref Camera2D (offset y) c))
 
   (define-ftype Mesh
     (struct
@@ -679,23 +747,8 @@
   ;; (define make-camera make-camera3d)
 
   ;; ;; Camera2D constructor
-  (define (make-camera2d offset target rotation zoom)
-    (let* ((c (make-ftype-pointer Camera2D (foreign-alloc (ftype-sizeof Camera2D))))
-           (offset-x (ftype-&ref Camera2D (offset x) c))
-           (offset-y (ftype-&ref Camera2D (offset y) c))
-           (target-x (ftype-&ref Camera2D (target x) c))
-           (target-y (ftype-&ref Camera2D (target y) c)))
-
-      (ftype-set! float () offset-x (ftype-ref Vector2 (x) offset))
-      (ftype-set! float () offset-y (ftype-ref Vector2 (y) target))
-
-      (ftype-set! float () target-x (ftype-ref Vector2 (x) offset))
-      (ftype-set! float () target-y (ftype-ref Vector2 (y) offset))
-
-      (ftype-set! Camera2D (rotation) c (inexact rotation))
-      (ftype-set! Camera2D (zoom) c (inexact zoom))
-      (register-object c finalizer)
-      c))
+  
+    
 
   ;; ;; Color constructor
   (define (make-color r g b a)
@@ -923,13 +976,19 @@
 
 
   ;; Sequences
-  (define-syntax make-pod-vec
+  (define-syntax make-fvec
     (lambda (stx)
       (syntax-case stx ()
         ((_ type num-elements)
          #'(let ((fptr (make-ftype-pointer type (foreign-alloc (* num-elements (ftype-sizeof type))))))
              (register-object fptr finalizer)
              fptr)))))
+
+  (define-syntax fvec-at
+    (lambda (stx)
+      (syntax-case stx ()
+        ((_ ftype v idx)
+         #'(make-ftype-pointer ftype (+ (ftype-pointer-address v) (* idx (ftype-sizeof ftype))))))))
   
   (define init-window
     (foreign-procedure "InitWindow" (int int string) void))
@@ -1419,15 +1478,26 @@
     (foreign-procedure "PlayAutomationEvent" ((& AutomationEvent)) void))
 
   ;; Input-related functions: keyboard
-  (define is-key-pressed
-    (foreign-procedure "IsKeyPressed" (int) boolean))
+  
+  (define is-key-pressed-raw
+    (foreign-procedure "IsKeyPressed" (int) unsigned-8))
+
+  (define (is-key-pressed keycode)
+    (let 
+        ((v (is-key-pressed-raw keycode)))
+      (not (= v 0))))
 
   (define is-key-pressed-repeat
     (foreign-procedure "IsKeyPressedRepeat" (int) boolean))
 
-  (define is-key-down
-    (foreign-procedure "IsKeyDown" (int) boolean))
-
+  (define is-key-down-raw
+    (foreign-procedure "IsKeyDown" (int) unsigned-8))
+    
+  (define (is-key-down keycode)
+    (let 
+        ((v (is-key-down-raw keycode)))
+      (not (= v 0))))
+  
   (define is-key-released
     (foreign-procedure "IsKeyReleased" (int) boolean))
 
@@ -1575,8 +1645,12 @@
   (define draw-pixel-v
     (foreign-procedure "DrawPixelV" ((& Vector2) (& Color)) void))
 
-  (define draw-line
+  (define draw-line-raw
     (foreign-procedure "DrawLine" (int int int int (& Color)) void))
+
+  (define (draw-line p1 p2 p3 p4 color)
+    (printf "draw-line ~a ~a ~a ~a\n" p1 p2 p3 p4)
+    (draw-line-raw (inexact->exact p1) (inexact->exact p2) (inexact->exact p3) (inexact->exact p4) color))
 
   (define draw-line-v
     (foreign-procedure "DrawLineV" ((& Vector2) (& Vector2) (& Color)) void))

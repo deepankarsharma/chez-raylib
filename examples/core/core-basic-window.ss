@@ -39,7 +39,7 @@
     (set-target-fps 30) 
                       
     ;; Jump to our ui-loop
-    (core-basic-window)))
+    (ui-loop)))
 
 
 (app)
